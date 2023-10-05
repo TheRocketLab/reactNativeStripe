@@ -1,0 +1,48 @@
+# For an image to be processed and sent to slack, it needs to sit in the 
+# MaestroTests/TestResults folder. The path is relative to the root of the project
+appId: com.rktlbdemoreactnativemocklogin
+---
+- clearState 
+- launchApp
+- tapOn: "Email"
+- inputText: "john@mail.com"
+- tapOn: "Password"
+- inputText: "changeme"
+- pressKey: back
+- takeScreenshot: "MaestroTests/TestResults/detailsentered"
+- assertVisible: "Login"
+- tapOn: "Login"
+- assertVisible: "Skip"
+- takeScreenshot: "MaestroTests/TestResults/skipscreen"
+- tapOn: "Skip" 
+- assertVisible: "Welcome to the Home Screen!" # Should be Welcome to the App
+- takeScreenshot: "MaestroTests/TestResults/successful-login"
+- tapOn: "Make API Call" 
+- assertVisible: "Welcome to the Home Screen!"
+- tapOn: "Clear Access Token" 
+- assertVisible: "Welcome to the Home Screen!" # Clicking clear token shouldn't instantly kick you out of the app - emulating out of date access token
+- tapOn: "Make API Call" # When this fails, it should take us back to the login screen
+# - assertVisible: "Token was refreshed!" # Assert that the refresh had occured. # note: This test is not possible anymore now that there is not a specific piece of text to show a refresh token has happened.
+- takeScreenshot: "MaestroTests/TestResults/token-refreshed"
+- tapOn: "Clear Access Token" 
+- tapOn: "Clear Refresh Token" 
+- tapOn: "Make API Call" # When this fails, it should take us back to the login screen
+- takeScreenshot: "MaestroTests/TestResults/token-warning-none-available"
+- assertVisible: "Email" # The login screen should have the login information cleared out.
+# Login again to test logging out without a biometric prompt
+- tapOn: "Email"
+- inputText: "john@mail.com"
+- tapOn: "Password"
+- inputText: "changeme"
+- pressKey: back
+# Get rid of the Message saying that the token did not exist - note no ID available to target it.
+# This also doesn't appear in Production builds, only on yarn android versions.
+- tapOn:
+    point: "92%,89%"
+- assertVisible: "Login"
+- tapOn: "Login"
+- assertVisible: "Skip"
+- tapOn: "Skip"
+- tapOn: "Logout"
+- assertVisible: "Email" # The login screen should have the login information cleared out, and no biometric prompt
+- takeScreenshot: "MaestroTests/TestResults/logout-nobiometric"

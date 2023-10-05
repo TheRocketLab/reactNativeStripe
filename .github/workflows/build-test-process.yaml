@@ -1,0 +1,128 @@
+name: 🧪 Build, test and process (no posting to slack)
+on:
+  push:
+    branches:
+#     Typically the corporate site is rarely changing once it's finalised, so we can save on build minutes by only triggering it when we need to.
+      - fakebranch # Uncomment and set to the branch you want to listen to (ie main)  
+  # Allows you to run this workflow manually from the Actions tab.
+  workflow_dispatch:
+
+jobs:
+
+  # JOB-yarn:
+  #   name: Check build requirements
+  #   runs-on: [self-hosted, brett]
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: "Install yarn dependencies"
+  #       run: |
+  #         yarn install
+
+  JOB-build-app:
+    name: Build the app
+    runs-on: [self-hosted, brett]
+    steps:
+      - name: Check for a connected Android device
+        run: |
+          devices=$(adb devices | grep -v "List of devices attached" | grep -v "^$")
+          if [ -z "$devices" ]; then
+            echo "No Android devices were found."
+            echo "Set it up so you see it when you run ADB devices, and enable debugger/usb on your phone or start an emulator."
+            echo "Exiting..."
+            exit 1
+          else
+            echo "✅ Found the following connected Android devices:"
+            echo "$devices"
+          fi         
+      - uses: actions/checkout@v3
+      - name: "Build app"
+        run: |
+          yarn install
+          cd android
+          ./gradlew assembleRelease   
+          
+  JOB-test-app:
+    name: Install and test the app
+    runs-on: [self-hosted, brett]    
+    needs: JOB-build-app     # or alternatively source the APK file to run
+    timeout-minutes: 5
+    steps:            
+
+      - name: "Check for built app"
+        run: |
+          pwd
+          ls -lash android/app/build/outputs/apk/release/app-release.apk
+      
+      #TODO make this be a generic step?
+      - name: "Install the Application"
+        run: |
+          adb install android/app/build/outputs/apk/release/app-release.apk
+
+      # Given an android phone, this command does the following:
+      # Presses the power button, types in the pincode, and presses enter, then presses the home button.
+      # This is not needed if your phone has no lock, and can save a few seconds.
+      - name: "Start the phone"
+        run: |
+          adb shell input keyevent KEYCODE_MENU && adb shell input text ${{ secrets.PHONE_PIN_CODE }} && adb shell input keyevent KEYCODE_ENTER && adb shell input keyevent KEYCODE_HOME
+
+      - name: "Run the test suite"
+        id: run_tests
+        #  You need to set the below to true, if you want failing steps to still be posted to slack.
+        #  With it off, you will only see successful tests get posted, as processing will stop.          
+        continue-on-error: true        
+        # run: |
+        #   maestro test maestrotests/functionality.yaml
+        run: |
+          mkdir -p MaestroTests/TestResults
+          maestro test --format junit --output MaestroTests/TestResults/report.xml MaestroTests/autorun | tee testresults.txt
+          exit_status=${PIPESTATUS[0]}
+          if [ $exit_status -ne 0 ]; then
+            echo "Error: The command failed with exit status $exit_status"
+            exit $exit_status
+          fi
+
+      - name: "If the tests failed, save the failure screenshot as well"
+        if: ${{ steps.run_tests.outcome == 'failure' }}
+        run: |
+          echo "The test before failed, lets save the picture from the test"
+          #   FAILEDTESTLOCATION=$(grep -oE '/Users/[^/]+/.maestro/tests/[0-9_-]+' testresults.txt) # Mac Specific one
+          FAILEDTESTLOCATION=$(grep -oE '/[^ ]+/.maestro/tests/[0-9_-]+' testresults.txt)
+          echo $FAILEDTESTLOCATION
+          ls -lash $FAILEDTESTLOCATION
+          if [[ -n "$FAILEDTESTLOCATION" ]]; then
+            echo "Found folder name: $FAILEDTESTLOCATION"
+            cp "$FAILEDTESTLOCATION"/*.png MaestroTests/TestResults/
+          else
+            echo "No folder name found."
+          fi
+
+      - name: "Info: Check for report file existing"
+        run: |
+          ls -lash MaestroTests/TestResults/report.xml
+
+      - name: "Info: Show pictures/files that are saved in test results folder"
+        run: |
+            ls -lash MaestroTests/TestResults/
+  
+
+      - name: "Info: Check for failed image"
+        run: |
+            ls -lash $FAILEDTESTLOCATION
+
+      - name: "Info: status of test run"
+        run: |
+            echo outcome: ${{ steps.run_tests.outcome }}
+            echo conclusion: ${{ steps.run_tests.conclusion }}
+
+    
+            
+    # Don't post it to slack.
+    #   - name: Check test results and post to slack
+    #     id: testresults
+    #     uses: brett-james-rocketlab/maestro-test-results-to-slack@main
+    #     # See the readme.md in the repo for more information on these.
+    #     env:
+    #       SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+    #       SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+    # #      INTRO_MESSAGE: From bleedingedgeRN   # This is optional
+    #       TEST_RESULTS_FOLDER: MaestroTests/TestResults/
